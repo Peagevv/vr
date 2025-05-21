@@ -2,11 +2,56 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>VR Panorama Viewer con Profundidad</title>
+  <title>VR Panorama con Diálogo Interactivo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { margin: 0; }
+    body { margin: 0; overflow: hidden; font-family: sans-serif; }
     canvas { display: block; }
+
+    /* Contenedor del diálogo */
+    #dialog-container {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.7);
+      padding: 15px 20px;
+      border-radius: 10px;
+      color: white;
+      max-width: 400px;
+      font-size: 16px;
+      user-select: none;
+      z-index: 10;
+    }
+    #question {
+      margin-bottom: 15px;
+    }
+    .option-button {
+      display: block;
+      width: 100%;
+      margin: 5px 0;
+      padding: 10px;
+      font-size: 16px;
+      background: #444;
+      border: none;
+      border-radius: 6px;
+      color: white;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    .option-button:hover {
+      background: #666;
+    }
+    .correct {
+      background-color: #4caf50 !important;
+    }
+    .wrong {
+      background-color: #f44336 !important;
+    }
+    #result {
+      margin-top: 10px;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
@@ -31,33 +76,26 @@
     document.body.appendChild(renderer.domElement);
     document.body.appendChild(VRButton.createButton(renderer));
 
-    // Cargar texturas: panorama y mapa de profundidad
     const loader = new THREE.TextureLoader();
     const texture = loader.load('office.jpg');
-    const depthTexture = loader.load('office_depth.jpg'); // Debes tener este archivo, mapa de profundidad
+    const depthTexture = loader.load('office_depth.jpg'); // Mapa de profundidad (tienes que proveerlo)
 
     texture.mapping = THREE.EquirectangularReflectionMapping;
     depthTexture.minFilter = THREE.LinearFilter;
     depthTexture.magFilter = THREE.LinearFilter;
 
-    // Geometría: esfera invertida para panorama
     const geometry = new THREE.SphereGeometry(500, 60, 40);
     geometry.scale(-1, 1, 1);
 
-    // Material personalizado con mapa de profundidad
     const material = new THREE.ShaderMaterial({
       uniforms: {
         map: { value: texture },
         depthMap: { value: depthTexture },
-        cameraPos: { value: camera.position },
       },
       vertexShader: `
         varying vec2 vUv;
-        varying vec3 vPosition;
-
         void main() {
           vUv = uv;
-          vPosition = position;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
@@ -65,15 +103,11 @@
         uniform sampler2D map;
         uniform sampler2D depthMap;
         varying vec2 vUv;
-
         void main() {
           vec4 color = texture2D(map, vUv);
           float depth = texture2D(depthMap, vUv).r;
-
-          // Modificamos el color basado en profundidad para simular efecto de profundidad
-          // Ejemplo simple: oscurecer según profundidad
+          // Oscurece un poco basado en la profundidad
           color.rgb *= 1.0 - depth * 0.5;
-
           gl_FragColor = color;
         }
       `
@@ -83,6 +117,8 @@
     scene.add(mesh);
 
     window.addEventListener('resize', onWindowResize);
+
+    setupDialog();
   }
 
   function onWindowResize() {
@@ -95,6 +131,76 @@
     renderer.setAnimationLoop(() => {
       renderer.render(scene, camera);
     });
+  }
+
+  // ------- DIALOGO INTERACTIVO -------
+
+  // Pregunta y opciones
+  const questionData = {
+    question: '¿Cuánto entras a una empresa lo primero que debes revisar es?',
+    options: [
+      { label: 'a) Contrato', correct: true },
+      { label: 'b) Sueldo', correct: false },
+      { label: 'c) Prestaciones', correct: false }
+    ]
+  };
+
+  function setupDialog() {
+    // Crear contenedor dialogo
+    const container = document.createElement('div');
+    container.id = 'dialog-container';
+
+    // Pregunta
+    const questionEl = document.createElement('div');
+    questionEl.id = 'question';
+    questionEl.textContent = questionData.question;
+    container.appendChild(questionEl);
+
+    // Opciones
+    questionData.options.forEach((opt, idx) => {
+      const btn = document.createElement('button');
+      btn.className = 'option-button';
+      btn.textContent = opt.label;
+      btn.addEventListener('click', () => {
+        handleAnswer(idx, btn);
+      });
+      container.appendChild(btn);
+    });
+
+    // Resultado
+    const resultEl = document.createElement('div');
+    resultEl.id = 'result';
+    container.appendChild(resultEl);
+
+    document.body.appendChild(container);
+  }
+
+  function handleAnswer(selectedIndex, button) {
+    const container = document.getElementById('dialog-container');
+    const buttons = container.querySelectorAll('.option-button');
+    const resultEl = document.getElementById('result');
+
+    // Desactivar todos los botones
+    buttons.forEach(b => b.disabled = true);
+
+    // Revisar si es correcta la respuesta
+    if (questionData.options[selectedIndex].correct) {
+      button.classList.add('correct');
+      resultEl.textContent = '¡Correcto! 🎉';
+      resultEl.style.color = '#4caf50';
+    } else {
+      button.classList.add('wrong');
+      resultEl.textContent = 'Respuesta incorrecta. Intenta de nuevo.';
+      resultEl.style.color = '#f44336';
+
+      // Permitir que el usuario intente otra vez quitando deshabilitado y colores incorrectos excepto la correcta
+      buttons.forEach((b, i) => {
+        if (!questionData.options[i].correct) {
+          b.disabled = false;
+          b.classList.remove('wrong');
+        }
+      });
+    }
   }
 </script>
 </body>
