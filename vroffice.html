@@ -1,294 +1,60 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>VR Panorama con Diálogo Interactivo y Profundidad</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="utf-8">
+  <title>VR Panorama Viewer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { margin: 0; overflow: hidden; font-family: sans-serif; }
+    body { margin: 0; }
     canvas { display: block; }
-
-    /* Contenedor del diálogo */
-    #dialog-container {
-      position: fixed;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0,0,0,0.7);
-      padding: 15px 20px;
-      border-radius: 10px;
-      color: white;
-      max-width: 400px;
-      font-size: 16px;
-      user-select: none;
-      z-index: 10;
-    }
-    #question {
-      margin-bottom: 15px;
-    }
-    .option-button {
-      display: block;
-      width: 100%;
-      margin: 5px 0;
-      padding: 10px;
-      font-size: 16px;
-      background: #444;
-      border: none;
-      border-radius: 6px;
-      color: white;
-      cursor: pointer;
-      transition: background-color 0.3s;
-    }
-    .option-button:hover {
-      background: #666;
-    }
-    .correct {
-      background-color: #4caf50 !important;
-    }
-    .wrong {
-      background-color: #f44336 !important;
-    }
-    #result {
-      margin-top: 10px;
-      font-weight: bold;
-    }
-    
-    /* Botón de cambio de escenario */
-    #scene-selector {
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 10;
-      background: rgba(0,0,0,0.7);
-      padding: 10px;
-      border-radius: 5px;
-    }
-    #scene-selector button {
-      margin: 0 5px;
-      padding: 8px 12px;
-      background: #555;
-      border: none;
-      border-radius: 4px;
-      color: white;
-      cursor: pointer;
-    }
-    #scene-selector button:hover {
-      background: #777;
-    }
   </style>
 </head>
 <body>
-  <div id="scene-selector">
-    <button id="scene-office">Oficina</button>
-    <button id="scene-nature">Naturaleza</button>
-    <button id="scene-city">Ciudad</button>
-  </div>
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+    import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-<script type="module">
-  import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
-  import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
+    let camera, scene, renderer;
 
-  let camera, scene, renderer;
-  let mesh;
-  let currentTexture, currentDepthTexture;
+    init();
+    animate();
 
-  // Texturas disponibles
-  const scenes = {
-    'scene-office': {
-      panorama: 'office.jpg',
-      depth: 'office_depth.jpg'
-    },
-    'scene-nature': {
-      panorama: 'nature.jpg',
-      depth: 'nature_depth.jpg'
-    },
-    'scene-city': {
-      panorama: 'city.jpg',
-      depth: 'city_depth.jpg'
-    }
-  };
+    function init() {
+      // Crear escena
+      scene = new THREE.Scene();
 
-  init();
-  animate();
+      // Cámara
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
-  function init() {
-    scene = new THREE.Scene();
+      // Renderizador
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      document.body.appendChild(renderer.domElement);
+      document.body.appendChild(VRButton.createButton(renderer));
 
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.xr.enabled = true;
-    document.body.appendChild(renderer.domElement);
-    document.body.appendChild(VRButton.createButton(renderer));
-
-    // Cargar escena inicial
-    loadScene('scene-office');
-
-    // Configurar botones de cambio de escena
-    document.getElementById('scene-office').addEventListener('click', () => loadScene('scene-office'));
-    document.getElementById('scene-nature').addEventListener('click', () => loadScene('scene-nature'));
-    document.getElementById('scene-city').addEventListener('click', () => loadScene('scene-city'));
-
-    window.addEventListener('resize', onWindowResize);
-
-    // Configurar diálogo interactivo
-    setupDialog();
-  }
-
-  function loadScene(sceneKey) {
-    const loader = new THREE.TextureLoader();
-    
-    // Eliminar malla anterior si existe
-    if (mesh) {
-      scene.remove(mesh);
-      if (currentTexture) currentTexture.dispose();
-      if (currentDepthTexture) currentDepthTexture.dispose();
-    }
-
-    // Cargar nuevas texturas
-    const texture = loader.load(scenes[sceneKey].panorama);
-    const depthTexture = loader.load(scenes[sceneKey].depth);
-
-    texture.mapping = THREE.EquirectangularReflectionMapping;
-    depthTexture.minFilter = THREE.LinearFilter;
-    depthTexture.magFilter = THREE.LinearFilter;
-
-    currentTexture = texture;
-    currentDepthTexture = depthTexture;
-
-    const geometry = new THREE.SphereGeometry(500, 60, 40);
-    geometry.scale(-1, 1, 1);
-
-    const material = new THREE.ShaderMaterial({
-      uniforms: {
-        map: { value: texture },
-        depthMap: { value: depthTexture },
-        cameraPos: { value: camera.position },
-      },
-      vertexShader: `
-        varying vec2 vUv;
-        varying vec3 vPosition;
-
-        void main() {
-          vUv = uv;
-          vPosition = position;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform sampler2D map;
-        uniform sampler2D depthMap;
-        varying vec2 vUv;
-
-        void main() {
-          vec4 color = texture2D(map, vUv);
-          float depth = texture2D(depthMap, vUv).r;
-
-          // Efecto de profundidad: oscurecer áreas más lejanas
-          color.rgb *= 1.0 - depth * 0.5;
-
-          // Añadir un ligero efecto de niebla basado en la profundidad
-          float fogFactor = smoothstep(0.3, 0.8, depth);
-          vec3 fogColor = vec3(0.8, 0.8, 0.9);
-          color.rgb = mix(color.rgb, fogColor, fogFactor * 0.3);
-
-          gl_FragColor = color;
-        }
-      `
-    });
-
-    mesh = new THREE.Mesh(geometry, material);
-    scene.add(mesh);
-  }
-
-  function onWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  }
-
-  function animate() {
-    renderer.setAnimationLoop(() => {
-      renderer.render(scene, camera);
-    });
-  }
-
-  // ------- DIALOGO INTERACTIVO -------
-
-  // Pregunta y opciones
-  const questionData = {
-    question: '¿Cuánto entras a una empresa lo primero que debes revisar es?',
-    options: [
-      { label: 'a) Contrato', correct: true },
-      { label: 'b) Sueldo', correct: false },
-      { label: 'c) Prestaciones', correct: false }
-    ]
-  };
-
-  function setupDialog() {
-    // Crear contenedor dialogo
-    const container = document.createElement('div');
-    container.id = 'dialog-container';
-
-    // Pregunta
-    const questionEl = document.createElement('div');
-    questionEl.id = 'question';
-    questionEl.textContent = questionData.question;
-    container.appendChild(questionEl);
-
-    // Opciones
-    questionData.options.forEach((opt, idx) => {
-      const btn = document.createElement('button');
-      btn.className = 'option-button';
-      btn.textContent = opt.label;
-      btn.addEventListener('click', () => {
-        handleAnswer(idx, btn);
+      // Cargar imagen panorámica
+      const loader = new THREE.TextureLoader();
+      loader.load('office.jpg', function (texture) {
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+        scene.background = texture;
       });
-      container.appendChild(btn);
-    });
 
-    // Resultado
-    const resultEl = document.createElement('div');
-    resultEl.id = 'result';
-    container.appendChild(resultEl);
+      // Redimensionar
+      window.addEventListener('resize', onWindowResize);
+    }
 
-    document.body.appendChild(container);
-  }
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
 
-  function handleAnswer(selectedIndex, button) {
-    const container = document.getElementById('dialog-container');
-    const buttons = container.querySelectorAll('.option-button');
-    const resultEl = document.getElementById('result');
-
-    // Desactivar todos los botones
-    buttons.forEach(b => b.disabled = true);
-
-    // Revisar si es correcta la respuesta
-    if (questionData.options[selectedIndex].correct) {
-      button.classList.add('correct');
-      resultEl.textContent = '¡Correcto! 🎉';
-      resultEl.style.color = '#4caf50';
-      
-      // Ocultar el diálogo después de 3 segundos
-      setTimeout(() => {
-        container.style.display = 'none';
-      }, 3000);
-    } else {
-      button.classList.add('wrong');
-      resultEl.textContent = 'Respuesta incorrecta. Intenta de nuevo.';
-      resultEl.style.color = '#f44336';
-
-      // Permitir que el usuario intente otra vez quitando deshabilitado y colores incorrectos excepto la correcta
-      buttons.forEach((b, i) => {
-        if (!questionData.options[i].correct) {
-          b.disabled = false;
-          b.classList.remove('wrong');
-        }
+    function animate() {
+      renderer.setAnimationLoop(() => {
+        renderer.render(scene, camera);
       });
     }
-  }
-</script>
+  </script>
 </body>
 </html>
