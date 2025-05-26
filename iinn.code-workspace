@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "../iinn"
+		},
+		{
+			"path": "D:/innova"
+		},
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"liveServer.settings.multiRootWorkspaceName": "vr"
+	}
+}
