@@ -2,19 +2,298 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>VR Panorama Viewer</title>
+  <title>VR Panorama Viewer with Character</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { margin: 0; }
-    canvas { display: block; }
+    body { 
+      margin: 0; 
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    canvas { 
+      display: block; 
+    }
+    
+    /* Estilos para el sistema de diálogos */
+    #dialogContainer {
+      display: none;
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 80%;
+      max-width: 800px;
+      z-index: 500;
+    }
+
+    #dialogContainer>div {
+      background: rgba(0, 0, 0, 0.8);
+      border: 3px solid #3A86FF;
+      border-radius: 10px;
+      padding: 20px;
+      color: white;
+      font-family: 'Courier New', monospace;
+      max-height: 60vh;
+      overflow-y: auto;
+    }
+
+    #speakerName {
+      font-weight: bold;
+      color: #ada9e6;
+      margin-bottom: 10px;
+    }
+
+    #dialogText {
+      margin-bottom: 15px;
+      line-height: 1.4;
+      animation: typewriter 0.05s steps(1) infinite;
+    }
+
+    #dialogOptions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .dialog-option {
+      padding: 10px;
+      background: rgba(30, 23, 19, 0.5);
+      border: 1px solid #2D3748;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.2s;
+      text-align: left;
+    }
+
+    .dialog-option:hover {
+      background: linear-gradient(to right, rgba(59, 131, 246, 0.383), rgba(222, 21, 209, 0.5));
+    }
+
+    #continueButton {
+      margin-top: 15px;
+      padding: 8px 15px;
+      background: #4a5057;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      display: none;
+    }
+
+    #continueButton:hover {
+      background: linear-gradient(to right, rgba(59, 131, 246, 0.383), rgba(222, 21, 209, 0.5));
+    }
+
+    @keyframes typewriter {
+      from { opacity: 0.8; }
+      to { opacity: 1; }
+    }
+    
+    #info {
+      position: absolute;
+      top: 10px;
+      width: 100%;
+      text-align: center;
+      color: white;
+      background-color: rgba(0, 0, 0, 0.5);
+      padding: 10px;
+      z-index: 100;
+    }
+    
+    /* Elemento para mostrar el botón VR */
+    #vr-button-container {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      z-index: 100;
+    }
   </style>
 </head>
+
+<!-- Elementos de audio -->
+<audio id="dialogSound" preload="auto">
+  <source src="m.e.mp3" type="audio/mpeg">
+</audio>
+
 <body>
+  <div id="info">VR Panorama - Acércate al personaje para interactuar</div>
+  <div id="vr-button-container"></div>
+  
+  <!-- Sistema de diálogos -->
+  <div id="dialogContainer">
+    <div>
+      <div id="speakerName">LOUISE</div>
+      <div id="dialogText"></div>
+      <div id="dialogOptions"></div>
+      <button id="continueButton">Continuar</button>
+    </div>
+  </div>
+
   <script type="module">
     import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
     import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
+    import { FBXLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/FBXLoader.js';
 
     let camera, scene, renderer;
+    let character, mixer, idleAction, currentAction;
+    let isNearLouise = false;
+    let hasStartedDialog = false;
+    const DIALOG_TRIGGER_DISTANCE = 3.0;
+    
+    // Variables para el sistema de diálogos
+    let currentDialogTree = null;
+    let currentDialogNode = null;
+    let isDialogTyping = false;
+    let dialogTimeout = null;
+    let currentTextPart = 0;
+    let dialogTextParts = [];
+    
+    // Definición de diálogos profesionales
+    const dialogs = {
+      start: {
+        text: "¡Hola! Bienvenido a PlayDual Lácteos, el lugar donde el queso no solo se produce... ¡también se aprende! 🧀\n\nSoy Louise, secretaria de planta. Aquí podrás explorar cómo funciona una planta real de producción de quesos, conocerás nuestras áreas clave y, si estás aplicando a una vacante, te haremos algunas preguntas para ver qué tan afinado está tu perfil.\n\nDime, ¿qué te gustaría hacer hoy?",
+        options: [
+          { text: "Me interesa conocer como funciona la planta", next: "func_planta" },
+          { text: "Estoy aplicando para un puesto como ingeniero industrial.", next: "entrevista" },
+          { text: "Solo estoy explorando por interés general..", next: "greeting" }
+        ],
+        character: "LOUISE"
+      },
+      func_planta: {
+        text: "¡Perfecto! Antes de dejarte pasar al área de producción, necesito saber si tienes algunas nociones básicas del trabajo que realizamos aquí. Te haré unas preguntas rápidas. No te preocupes, es solo para conocer tu nivel de familiaridad.",
+        options: [
+          { text: "¡De acuerdo, estoy listo!", next: "start_a" },
+          { text: "Creo que necesito estudiar un poco más...", next: "insecure_a" }
+        ],
+        character: "LOUISE"
+      },
+      start_a: {
+        text: "¿Cuál crees que es la función principal de un ingeniero industrial en una planta de producción?",
+        options: [
+          {
+            text: "Aplicar métodos cuantitativos y herramientas de análisis para mejorar continuamente los procesos, reduciendo tiempos, costos y desperdicios sin comprometer la calidad del producto final.",
+            next: "correct1"
+          },
+          {
+            text: "Implementar únicamente sistemas de mantenimiento correctivo y supervisar directamente la operación de maquinaria en cada turno.",
+            next: "incorrect1"
+          },
+          {
+            text: "Diseñar exclusivamente los protocolos de control microbiológico y físico-químico en productos lácteos, cumpliendo con normativas sanitarias internacionales.",
+            next: "incorrect1"
+          }
+        ],
+        character: "LOUISE"
+      },
+      correct1: {
+        text: "¡Correcto! Esa es una descripción precisa del rol del ingeniero industrial. Has demostrado tener una buena base.",
+        options: [
+          { text: "Continuar con la siguiente pregunta", next: "next_question_a" },
+          { text: "Volver al inicio", next: "start" }
+        ],
+        character: "LOUISE"
+      },
+      incorrect1: {
+        text: "No es del todo correcto. Esa función corresponde a otro perfil profesional. No te preocupes, puedes intentarlo de nuevo o seguir explorando.",
+        options: [
+          { text: "Intentar de nuevo", next: "start_a" },
+          { text: "Volver al inicio", next: "start" }
+        ],
+        character: "LOUISE"
+      },
+      next_question_a: {
+        text: "Excelente, ahora vamos con la siguiente pregunta. ¿Qué herramientas consideras esenciales para un ingeniero industrial en una planta de producción?",
+        options: [
+          {
+            text: "Sistemas de ejecución de manufactura (MES), herramientas de análisis estadístico como Minitab, simuladores de procesos (Arena, FlexSim) y enfoques de mejora como Lean Six Sigma.",
+            next: "correct2"
+          },
+          {
+            text: "Planos en AutoCAD, software de edición de imágenes, y herramientas ofimáticas como Excel y PowerPoint.",
+            next: "incorrect2"
+          },
+          {
+            text: "Sistemas de control numérico (CNC) sin integración con sistemas de gestión de calidad o procesos de mejora continua.",
+            next: "incorrect2"
+          }
+        ],
+        character: "LOUISE"
+      },
+      incorrect2: {
+        text: "Esa respuesta es demasiado básica y no refleja las herramientas avanzadas que un ingeniero industrial debe manejar. Intenta pensar en metodologías y tecnologías más específicas para la optimización de procesos.",
+        options: [
+          { text: "Intentar de nuevo", next: "next_question_a" },
+          { text: "Volver al inicio", next: "start" }
+        ],
+        character: "LOUISE"
+      },
+      correct2: {
+        text: "¡Muy bien! Has identificado las herramientas clave que un ingeniero industrial debe dominar para optimizar procesos y mejorar la eficiencia en la planta.",
+        options: [
+          { text: "Continuar con la siguiente pregunta", next: "next_question_b" },
+          { text: "Volver al inicio", next: "start" }
+        ],
+        character: "LOUISE"
+      },
+      next_question_b: {
+        text: "Ahora, una pregunta más. Ante un escenario sostenido de ineficiencia en una línea de producción automatizada, ¿cuál sería el enfoque más robusto y estructurado para diagnosticar y mitigar la causa raíz del problema?",
+        options: [
+          {
+            text: "Aplicar mantenimiento autónomo bajo los principios de TPM, revisar los históricos de OEE, e implementar planes de acción correctiva para las estaciones con mayor variabilidad en los tiempos de ciclo.",
+            next: "incorrect3aa"
+          },
+          {
+            text: "Implementar un enfoque basado en datos mediante la recopilación de KPIs en tiempo real a través de sensores IoT, realizar un análisis estadístico multivariable con herramientas como Minitab o Python, identificar cuellos de botella con mapas de flujo de valor (VSM), y aplicar DMAIC de Six Sigma para ejecutar soluciones sostenibles.",
+            next: "correctl"
+          },
+          {
+            text: "Utilizar herramientas de control estadístico de procesos (SPC) para monitorear variaciones, aplicar Kaizen para pequeñas mejoras continuas y reforzar la formación del personal operativo en prácticas estandarizadas.",
+            next: "incorrect3ab"
+          }
+        ],
+        character: "LOUISE"
+      },
+      correctl: {
+        text: "¡Correcto! Has demostrado un buen entendimiento de las metodologías y herramientas necesarias para abordar problemas complejos en la producción.",
+        text2: " Tu perfil parece alinearse con lo que buscamos.",
+        text3: " ¿Te gustaría explorar más sobre la planta o prefieres conocer más sobre la oficina?",
+        options: [
+          { text: " Explorar la planta", next: "explorar_planta" },
+          { text: "Explorar la oficia", next: "explorar_off" }
+        ],
+        character: "LOUISE"
+      },
+      incorrect3aa: {
+        text: "Esa estrategia aborda síntomas, pero no ataca la raíz del problema. Aunque TPM y OEE son útiles, no se integran con tecnologías emergentes ni con análisis predictivo en tiempo real. Intenta pensar en un enfoque más integral, que combine herramientas estadísticas avanzadas con metodologías estructuradas como DMAIC y tecnologías IoT.",
+        options: [
+          { text: "Intentar de nuevo", next: "fabrica_1" },
+          { text: "Volver al inicio", next: "start" }
+        ],
+        character: "LOUISE"
+      },
+      incorrect3ab: {
+        text: "Buena intención, pero limitada. Estas acciones ayudan a estabilizar procesos, pero no garantizan un análisis profundo de las causas raíz ni aprovechan datos en tiempo real para una mejore sostenible. Busca un enfoque más holístico, apoyado en datos y tecnología avanzada.",
+        options: [
+          { text: "Intentar de nuevo", next: "next_question_b" },
+          { text: "Volver al inicio", next: "start" }
+        ],
+        character: "LOUISE"
+      },
+      greeting: {
+        text: "¡Qué amable! Si necesitas algo, aquí estaré. Buen día.",
+        options: [],
+        character: "LOUISE"
+      },
+      end_helpful: {
+        text: "Perfecto. No dudes en preguntar si necesitas algo más. Estoy aquí para ayudar.",
+        options: [],
+        character: "LOUISE"
+      },
+      entrevista: {
+        text: "Version beta en desarrollo. Por favor, vuelve más tarde.",
+        character: "LOUISE"
+      },
+    };
 
     init();
     animate();
@@ -31,17 +310,69 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
-      document.body.appendChild(VRButton.createButton(renderer));
+      
+      // Añadir botón VR
+      document.getElementById('vr-button-container').appendChild(VRButton.createButton(renderer));
 
       // Cargar imagen panorámica
       const loader = new THREE.TextureLoader();
       loader.load('Office1.jpg', function (texture) {
         texture.mapping = THREE.EquirectangularReflectionMapping;
         scene.background = texture;
+        
+        // Una vez cargado el panorama, cargar el personaje
+        loadCharacter();
       });
+
+      // Configurar sistema de diálogos
+      setupDialogSystem();
+      setupInteraction();
 
       // Redimensionar
       window.addEventListener('resize', onWindowResize);
+      
+      // Configurar eventos de teclado
+      document.addEventListener('keydown', (e) => {
+        if (e.code === 'KeyE' && isNearLouise && !hasStartedDialog) {
+          hasStartedDialog = true;
+          startDialog(dialogs);
+        }
+      });
+    }
+
+    function loadCharacter() {
+      const loader = new FBXLoader();
+      
+      loader.load(
+        'louise/Idle.fbx',
+        (fbx) => {
+          character = fbx;
+          character.position.set(0, 0, -3); // Posicionar frente al usuario
+          character.scale.set(0.01, 0.01, 0.01);
+          character.name = 'Louise';
+          
+          // Configurar animaciones
+          if (fbx.animations && fbx.animations.length > 0) {
+            mixer = new THREE.AnimationMixer(character);
+            idleAction = mixer.clipAction(fbx.animations[0]);
+            idleAction.setLoop(THREE.LoopRepeat);
+            idleAction.play();
+            currentAction = idleAction;
+          }
+          
+          scene.add(character);
+          console.log('Personaje cargado correctamente');
+        },
+        undefined,
+        (error) => {
+          console.error('Error al cargar el personaje:', error);
+        }
+      );
+    }
+
+    function getDistanceToCharacter() {
+      if (!character || !camera) return Infinity;
+      return camera.position.distanceTo(character.position);
     }
 
     function onWindowResize() {
@@ -52,8 +383,269 @@
 
     function animate() {
       renderer.setAnimationLoop(() => {
+        // Actualizar animaciones
+        if (mixer) {
+          mixer.update(0.016); // Delta time aproximado para 60fps
+        }
+        
+        // Verificar proximidad al personaje
+        checkProximity();
+        
         renderer.render(scene, camera);
       });
+    }
+    
+    function checkProximity() {
+      const distance = getDistanceToCharacter();
+      
+      if (distance <= DIALOG_TRIGGER_DISTANCE) {
+        if (!isNearLouise) {
+          isNearLouise = true;
+          document.getElementById('info').textContent = "Presiona E para hablar con Louise";
+        }
+      } else {
+        if (isNearLouise) {
+          isNearLouise = false;
+          document.getElementById('info').textContent = "VR Panorama - Acércate al personaje para interactuar";
+          
+          if (hasStartedDialog) {
+            endDialog();
+            hasStartedDialog = false;
+          }
+        }
+      }
+    }
+    
+    /***********************/
+    /* SISTEMA DE DIÁLOGOS */
+    /***********************/
+    
+    function setupDialogSystem() {
+      // Evento para continuar
+      document.getElementById('continueButton').addEventListener('click', () => {
+        if (isDialogTyping) {
+          finishTyping();
+          return;
+        }
+
+        // Si hay más partes de texto por mostrar
+        if (currentTextPart < dialogTextParts.length - 1) {
+          currentTextPart++;
+          showTextPart(dialogTextParts[currentTextPart]);
+        } else {
+          // Si no hay más partes, mostrar opciones o cerrar diálogo
+          if (currentDialogNode.options && currentDialogNode.options.length > 0) {
+            showDialogOptions();
+          } else {
+            endDialog();
+          }
+        }
+      });
+    }
+    
+    function setupInteraction() {
+      // Configurar eventos de teclado para interacción
+      document.addEventListener('keydown', (e) => {
+        if (e.code === 'KeyE' && isNearLouise && !hasStartedDialog) {
+          hasStartedDialog = true;
+          startDialog(dialogs);
+        }
+      });
+    }
+    
+    function startDialog(dialogTree) {
+      // Mostrar contenedor de diálogo
+      const dialogContainer = document.getElementById('dialogContainer');
+      dialogContainer.style.display = 'block';
+
+      // Configurar diálogo inicial
+      currentDialogTree = dialogTree;
+      showDialogNode('start');
+    }
+    
+    function showDialogNode(nodeId) {
+      const node = dialogs[nodeId];
+      if (!node) return endDialog();
+
+      currentDialogNode = node;
+      document.getElementById('speakerName').textContent = node.character || 'LOUISE';
+
+      // Cambiar a animación de hablar
+      if (mixer && idleAction) {
+        if (currentAction) currentAction.stop();
+        idleAction.reset().play();
+        currentAction = idleAction;
+      }
+
+      // Dividir el texto en partes
+      splitDialogText(node.text);
+
+      // Mostrar la primera parte del texto
+      currentTextPart = 0;
+      showTextPart(dialogTextParts[currentTextPart]);
+
+      // Ocultar opciones inicialmente
+      document.getElementById('dialogOptions').innerHTML = '';
+      document.getElementById('continueButton').style.display = 'none';
+    }
+    
+    function splitDialogText(text) {
+      const maxCharsPerPart = 200;
+      dialogTextParts = [];
+
+      if (text.length <= maxCharsPerPart) {
+        dialogTextParts.push(text);
+        return;
+      }
+
+      const paragraphs = text.split('\n\n');
+
+      for (const paragraph of paragraphs) {
+        if (paragraph.length > maxCharsPerPart) {
+          const sentences = paragraph.split(/(?<=[.!?])\s+/);
+          let currentPart = '';
+
+          for (const sentence of sentences) {
+            if (currentPart.length + sentence.length > maxCharsPerPart && currentPart.length > 0) {
+              dialogTextParts.push(currentPart.trim());
+              currentPart = sentence;
+            } else {
+              currentPart += (currentPart.length > 0 ? ' ' : '') + sentence;
+            }
+          }
+
+          if (currentPart.length > 0) {
+            dialogTextParts.push(currentPart.trim());
+          }
+        } else {
+          dialogTextParts.push(paragraph);
+        }
+      }
+    }
+    
+    function showTextPart(part) {
+      isDialogTyping = true;
+      const dialogElement = document.getElementById('dialogText');
+      dialogElement.textContent = '';
+      const dialogSound = document.getElementById('dialogSound');
+      
+      dialogSound.volume = 0.3;
+      let soundTimeout;
+
+      if (mixer && idleAction) {
+        if (currentAction) currentAction.stop();
+        idleAction.reset().play();
+        currentAction = idleAction;
+      }
+
+      let currentIndex = 0;
+      const typingInterval = setInterval(() => {
+        if (currentIndex < part.length) {
+          dialogElement.textContent += part[currentIndex];
+          currentIndex++;
+          
+          // Reproducir sonido solo para caracteres visibles
+          if (part[currentIndex-1] !== ' ' && part[currentIndex-1] !== '\n') {
+            dialogSound.pause();
+            dialogSound.currentTime = 0;
+            dialogSound.play().catch(e => console.log("No se pudo reproducir sonido:", e));
+          }
+        } else {
+          clearInterval(typingInterval);
+          clearTimeout(soundTimeout);
+          isDialogTyping = false;
+
+          // Mostrar botón "Continuar" si hay más partes
+          if (currentTextPart < dialogTextParts.length - 1) {
+            document.getElementById('continueButton').style.display = 'block';
+            document.getElementById('continueButton').textContent = 'Continuar';
+          }
+          // Si es la última parte, mostrar opciones o botón "Cerrar"
+          else {
+            if (currentDialogNode.options && currentDialogNode.options.length > 0) {
+              showDialogOptions();
+            } else {
+              document.getElementById('continueButton').style.display = 'block';
+              document.getElementById('continueButton').textContent = 'Cerrar';
+            }
+
+            // Volver a animación Idle cuando termina de hablar
+            if (mixer && idleAction) {
+              if (currentAction) currentAction.stop();
+              idleAction.reset().play();
+              currentAction = idleAction;
+            }
+          }
+        }
+      }, 30);
+    }
+    
+    function showDialogOptions() {
+      const optionsContainer = document.getElementById('dialogOptions');
+      optionsContainer.innerHTML = '';
+
+      if (currentDialogNode.options && currentDialogNode.options.length > 0) {
+        currentDialogNode.options.forEach(option => {
+          const optionElement = document.createElement('div');
+          optionElement.className = 'dialog-option';
+          optionElement.textContent = option.text;
+          optionElement.addEventListener('click', () => {
+            showDialogNode(option.next);
+          });
+          optionsContainer.appendChild(optionElement);
+        });
+        document.getElementById('continueButton').style.display = 'none';
+      }
+    }
+    
+    function finishTyping() {
+      clearTimeout(dialogTimeout);
+      document.getElementById('dialogText').textContent = dialogTextParts[currentTextPart];
+      isDialogTyping = false;
+      
+      // Detener el sonido
+      const dialogSound = document.getElementById('dialogSound');
+      dialogSound.pause();
+      dialogSound.currentTime = 0;
+
+      // Mostrar botón "Continuar" si hay más partes
+      if (currentTextPart < dialogTextParts.length - 1) {
+        document.getElementById('continueButton').style.display = 'block';
+        document.getElementById('continueButton').textContent = 'Continuar';
+      }
+      // Si es la última parte, mostrar opciones o botón "Cerrar"
+      else {
+        if (currentDialogNode.options && currentDialogNode.options.length > 0) {
+          showDialogOptions();
+        } else {
+          document.getElementById('continueButton').style.display = 'block';
+          document.getElementById('continueButton').textContent = 'Cerrar';
+        }
+      }
+
+      // Volver a animación Idle cuando se fuerza el texto
+      if (mixer && idleAction) {
+        if (currentAction) currentAction.stop();
+        idleAction.reset().play();
+        currentAction = idleAction;
+      }
+    }
+    
+    function endDialog() {
+      document.getElementById('dialogContainer').style.display = 'none';
+      hasStartedDialog = false;
+      
+      // Detener el sonido
+      const dialogSound = document.getElementById('dialogSound');
+      dialogSound.pause();
+      dialogSound.currentTime = 0;
+
+      // Asegurarse de volver a la animación Idle
+      if (mixer && idleAction) {
+        if (currentAction) currentAction.stop();
+        idleAction.reset().play();
+        currentAction = idleAction;
+      }
     }
   </script>
 </body>
