@@ -1,468 +1,449 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
-    <title>Three.js WebXR VR - Panorama con Hand Input</title>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Quiz VR - Ingeniería Industrial</title>
+    <meta name="description" content="Quiz de Ingeniería Industrial en Realidad Virtual">
     <style>
         body {
-            font-family: Monospace;
+            margin: 0;
+            padding: 0;
             background-color: #000;
             color: #fff;
-            margin: 0px;
+            font-family: Arial, sans-serif;
             overflow: hidden;
         }
         
-        #blocker {
+        #info {
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.5);
-        }
-        
-        #instructions {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-            font-size: 14px;
-            cursor: pointer;
-        }
-        
-        .clickable {
-            background-color: #000;
-            padding: 10px;
-            border: 1px solid #fff;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
             border-radius: 5px;
-            margin: 10px;
+            max-width: 300px;
+        }
+        
+        #vrButton {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            z-index: 100;
+        }
+        
+        #vrButton:hover {
+            background: #45a049;
+        }
+        
+        #vrButton:disabled {
+            background: #666;
+            cursor: not-allowed;
         }
     </style>
 </head>
 <body>
-    <div id="blocker">
-        <div id="instructions">
-            <p style="font-size: 36px">Click to play</p>
-            <p>Move: WASD<br/>Jump: SPACE<br/>Look: MOUSE</p>
-            <p class="clickable">CLICK AQUÍ PARA INICIAR VR</p>
-        </div>
+    <div id="info">
+        <h3>Quiz VR - Ingeniería Industrial</h3>
+        <p>Usa los controladores VR para seleccionar las respuestas correctas.</p>
+        <p>Progreso: <span id="progress">0/5</span></p>
+        <p>Puntaje: <span id="score">0</span></p>
     </div>
-
+    
+    <button id="vrButton">Iniciar VR</button>
+    
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-
     <script>
-        let camera, scene, renderer;
-        let controller1, controller2;
-        let controllerGrip1, controllerGrip2;
-        let hand1, hand2;
-        let room;
-        let cubes = [];
+        // Variables globales
+        let scene, camera, renderer, controller1, controller2;
+        let raycaster = new THREE.Raycaster();
+        let intersected = [];
+        let currentQuestion = 0;
+        let score = 0;
+        let questionPanels = [];
+        let answerButtons = [];
         
-        const clock = new THREE.Clock();
-
+        // Preguntas de ingeniería industrial
+        const questions = [
+            {
+                question: "¿Cuál es el objetivo principal de la gestión de la calidad total (TQM)?",
+                answers: [
+                    "Reducir costos únicamente",
+                    "Mejorar continuamente todos los procesos",
+                    "Aumentar la velocidad de producción",
+                    "Eliminar empleados"
+                ],
+                correct: 1
+            },
+            {
+                question: "¿Qué técnica se usa para identificar desperdicios en lean manufacturing?",
+                answers: [
+                    "Diagrama de Pareto",
+                    "Las 7 mudas",
+                    "Gráfico de control",
+                    "Análisis ABC"
+                ],
+                correct: 1
+            },
+            {
+                question: "¿Cuál es la fórmula básica de productividad?",
+                answers: [
+                    "Producción / Tiempo",
+                    "Salidas / Entradas",
+                    "Calidad / Costo",
+                    "Eficiencia / Eficacia"
+                ],
+                correct: 1
+            },
+            {
+                question: "En el método de las 5S, ¿qué significa 'Seiri'?",
+                answers: [
+                    "Limpiar",
+                    "Ordenar",
+                    "Clasificar/Seleccionar",
+                    "Estandarizar"
+                ],
+                correct: 2
+            },
+            {
+                question: "¿Para qué se utiliza el diagrama de Ishikawa?",
+                answers: [
+                    "Planificar proyectos",
+                    "Analizar causas de problemas",
+                    "Controlar inventarios",
+                    "Diseñar productos"
+                ],
+                correct: 1
+            }
+        ];
+        
         init();
         animate();
-
+        
         function init() {
-            const container = document.createElement('div');
-            document.body.appendChild(container);
-
+            // Configurar escena
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x505050);
-
-            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 10);
-            camera.position.set(0, 1.6, 0);
-
-            // Crear el panorama (skybox)
-            createPanorama();
-
-            // Crear habitación
-            room = new THREE.LineSegments(
-                new THREE.BoxGeometry(6, 6, 6, 10, 10, 10),
-                new THREE.LineBasicMaterial({ color: 0x808080 })
-            );
-            room.geometry.translate(0, 3, 0);
-            scene.add(room);
-
-            // Crear cubos interactivos
-            createCubes();
-
-            // Iluminación
-            scene.add(new THREE.HemisphereLight(0x808080, 0x606060));
-            const light = new THREE.DirectionalLight(0xffffff);
-            light.position.set(0, 6, 0);
-            light.castShadow = true;
-            light.shadow.camera.top = 2;
-            light.shadow.camera.bottom = -2;
-            light.shadow.camera.right = 2;
-            light.shadow.camera.left = -2;
-            light.shadow.mapSize.set(4096, 4096);
-            scene.add(light);
-
-            // Renderer
+            scene.background = new THREE.Color(0x101030);
+            
+            // Configurar cámara
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 1.6, 3);
+            
+            // Configurar renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             renderer.xr.enabled = true;
-            container.appendChild(renderer.domElement);
-
-            // VR Button
-            document.body.appendChild(createVRButton());
-
-            // Controladores
-            setupControllers();
-
-            // Event listeners
+            document.body.appendChild(renderer.domElement);
+            
+            // Configurar iluminación
+            const light = new THREE.HemisphereLight(0xffffff, 0x444444);
+            light.position.set(1, 1, 1);
+            scene.add(light);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff);
+            directionalLight.position.set(1, 1, 1).normalize();
+            scene.add(directionalLight);
+            
+            // Crear suelo
+            const floorGeometry = new THREE.PlaneGeometry(20, 20);
+            const floorMaterial = new THREE.MeshLambertMaterial({ color: 0x222222 });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+            
+            // Configurar controladores VR
+            setupVRControllers();
+            
+            // Crear interfaz de preguntas
+            createQuestionInterface();
+            
+            // Configurar botón VR
+            setupVRButton();
+            
+            // Manejar redimensionamiento
             window.addEventListener('resize', onWindowResize);
-            
-            // Click to start
-            document.getElementById('blocker').addEventListener('click', function() {
-                document.getElementById('blocker').style.display = 'none';
-            });
         }
-
-        function createPanorama() {
-            // MÉTODO 1: Usar tu imagen local (RECOMENDADO)
-            // Pon tu imagen en la misma carpeta que este HTML y cambia 'tu-imagen.jpg' por el nombre de tu archivo
-            const loader = new THREE.TextureLoader();
-            loader.load('111.png.jpg', 
-                function(texture) {
-                    // Imagen cargada exitosamente
-                    const geometry = new THREE.SphereGeometry(500, 60, 40);
-                    geometry.scale(-1, 1, 1); // Invertir para ver desde adentro
-                    
-                    const material = new THREE.MeshBasicMaterial({ map: texture });
-                    const panorama = new THREE.Mesh(geometry, material);
-                    scene.add(panorama);
-                    
-                    console.log('Panorama cargado exitosamente');
-                },
-                function(progress) {
-                    // Progreso de carga
-                    console.log('Cargando panorama: ' + (progress.loaded / progress.total * 100) + '%');
-                },
-                function(error) {
-                    // Error al cargar - usar panorama de respaldo
-                    console.log('Error cargando imagen panorámica:', error);
-                    console.log('Usando panorama generado como respaldo...');
-                    createBackupPanorama();
-                }
-            );
-            
-            // MÉTODO 2: Usar input file (descomenta si quieres que el usuario seleccione la imagen)
-            /*
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = 'image/*';
-            input.style.position = 'absolute';
-            input.style.top = '10px';
-            input.style.left = '10px';
-            input.style.zIndex = '1000';
-            document.body.appendChild(input);
-            
-            input.addEventListener('change', function(event) {
-                const file = event.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = function(e) {
-                        const loader = new THREE.TextureLoader();
-                        loader.load(e.target.result, function(texture) {
-                            // Remover panorama anterior
-                            const oldPanorama = scene.getObjectByName('panorama');
-                            if (oldPanorama) scene.remove(oldPanorama);
-                            
-                            const geometry = new THREE.SphereGeometry(500, 60, 40);
-                            geometry.scale(-1, 1, 1);
-                            
-                            const material = new THREE.MeshBasicMaterial({ map: texture });
-                            const panorama = new THREE.Mesh(geometry, material);
-                            panorama.name = 'panorama';
-                            scene.add(panorama);
-                        });
-                    };
-                    reader.readAsDataURL(file);
-                }
-            });
-            */
-        }
-
-        function createBackupPanorama() {
-            // Panorama de respaldo generado por código
-            const canvas = document.createElement('canvas');
-            canvas.width = 2048;
-            canvas.height = 1024;
-            const context = canvas.getContext('2d');
-            
-            // Crear gradiente de atardecer
-            const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
-            gradient.addColorStop(0, '#FF6B35'); // Cielo - Atardecer naranja
-            gradient.addColorStop(0.7, '#F7931E'); // Medio - Naranja dorado
-            gradient.addColorStop(1, '#FFD23F'); // Suelo - Amarillo cálido
-            
-            context.fillStyle = gradient;
-            context.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // Añadir nubes naranjas
-            context.fillStyle = 'rgba(255, 140, 0, 0.6)';
-            for (let i = 0; i < 15; i++) {
-                const x = Math.random() * canvas.width;
-                const y = Math.random() * canvas.height * 0.4;
-                const size = 30 + Math.random() * 60;
-                context.beginPath();
-                context.arc(x, y, size, 0, Math.PI * 2);
-                context.fill();
-            }
-            
-            // Añadir un sol
-            context.fillStyle = 'rgba(255, 255, 100, 0.9)';
-            context.beginPath();
-            context.arc(canvas.width * 0.8, canvas.height * 0.3, 80, 0, Math.PI * 2);
-            context.fill();
-            
-            // Rayos de sol
-            context.strokeStyle = 'rgba(255, 255, 150, 0.3)';
-            context.lineWidth = 3;
-            for (let i = 0; i < 12; i++) {
-                const angle = (i / 12) * Math.PI * 2;
-                const startX = canvas.width * 0.8 + Math.cos(angle) * 100;
-                const startY = canvas.height * 0.3 + Math.sin(angle) * 100;
-                const endX = canvas.width * 0.8 + Math.cos(angle) * 150;
-                const endY = canvas.height * 0.3 + Math.sin(angle) * 150;
-                
-                context.beginPath();
-                context.moveTo(startX, startY);
-                context.lineTo(endX, endY);
-                context.stroke();
-            }
-
-            const texture = new THREE.CanvasTexture(canvas);
-            
-            // Crear esfera para el panorama
-            const geometry = new THREE.SphereGeometry(500, 60, 40);
-            geometry.scale(-1, 1, 1); // Invertir para ver desde adentro
-            
-            const material = new THREE.MeshBasicMaterial({ map: texture });
-            const panorama = new THREE.Mesh(geometry, material);
-            panorama.name = 'panorama';
-            scene.add(panorama);
-        }
-
-        function createCubes() {
-            const geometry = new THREE.BoxGeometry(0.15, 0.15, 0.15);
-            
-            for (let i = 0; i < 200; i++) {
-                const object = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({
-                    color: Math.random() * 0xffffff
-                }));
-
-                object.position.x = Math.random() * 4 - 2;
-                object.position.y = Math.random() * 2;
-                object.position.z = Math.random() * 4 - 2;
-
-                object.rotation.x = Math.random() * 2 * Math.PI;
-                object.rotation.y = Math.random() * 2 * Math.PI;
-                object.rotation.z = Math.random() * 2 * Math.PI;
-
-                object.scale.setScalar(Math.random() + 0.5);
-                object.castShadow = true;
-                object.receiveShadow = true;
-
-                scene.add(object);
-                cubes.push(object);
-            }
-        }
-
-        function setupControllers() {
-            // Controladores estándar
+        
+        function setupVRControllers() {
             controller1 = renderer.xr.getController(0);
             controller1.addEventListener('selectstart', onSelectStart);
             controller1.addEventListener('selectend', onSelectEnd);
             scene.add(controller1);
-
+            
             controller2 = renderer.xr.getController(1);
             controller2.addEventListener('selectstart', onSelectStart);
             controller2.addEventListener('selectend', onSelectEnd);
             scene.add(controller2);
-
-            // Geometría para visualizar controladores
-            const controllerModelFactory = {
-                createControllerModel: function() {
-                    const geometry = new THREE.CylinderGeometry(0.005, 0.05, 0.1, 6);
-                    const material = new THREE.MeshLambertMaterial({ color: 0xff0000 });
-                    return new THREE.Mesh(geometry, material);
-                }
-            };
-
-            controllerGrip1 = renderer.xr.getControllerGrip(0);
-            controllerGrip1.add(controllerModelFactory.createControllerModel());
-            scene.add(controllerGrip1);
-
-            controllerGrip2 = renderer.xr.getControllerGrip(1);
-            controllerGrip2.add(controllerModelFactory.createControllerModel());
-            scene.add(controllerGrip2);
-
-            // Hand tracking
-            hand1 = renderer.xr.getHand(0);
-            scene.add(hand1);
-
-            hand2 = renderer.xr.getHand(1);
-            scene.add(hand2);
-
-            // Geometría para las líneas de los controladores
+            
+            // Crear geometría de rayos
             const geometry = new THREE.BufferGeometry().setFromPoints([
                 new THREE.Vector3(0, 0, 0),
                 new THREE.Vector3(0, 0, -1)
             ]);
-
-            const line = new THREE.Line(geometry);
-            line.name = 'line';
-            line.scale.z = 5;
-
-            controller1.add(line.clone());
-            controller2.add(line.clone());
+            
+            const line1 = new THREE.Line(geometry);
+            line1.name = 'line';
+            line1.scale.z = 5;
+            controller1.add(line1.clone());
+            
+            const line2 = new THREE.Line(geometry);
+            line2.name = 'line';
+            line2.scale.z = 5;
+            controller2.add(line2.clone());
         }
-
-        function createVRButton() {
-            const button = document.createElement('button');
-            button.style.position = 'absolute';
-            button.style.bottom = '20px';
-            button.style.left = '50%';
-            button.style.transform = 'translateX(-50%)';
-            button.style.padding = '12px 20px';
-            button.style.border = 'none';
-            button.style.borderRadius = '4px';
-            button.style.background = '#1f1f1f';
-            button.style.color = 'white';
-            button.style.font = 'normal 13px sans-serif';
-            button.style.cursor = 'pointer';
-            button.textContent = 'ENTER VR';
-
-            button.onclick = function() {
-                if (renderer.xr.isPresenting) {
-                    renderer.xr.setSession(null);
+        
+        function createQuestionInterface() {
+            // Limpiar paneles anteriores
+            questionPanels.forEach(panel => scene.remove(panel));
+            answerButtons.forEach(button => scene.remove(button));
+            questionPanels = [];
+            answerButtons = [];
+            
+            if (currentQuestion >= questions.length) {
+                showFinalScore();
+                return;
+            }
+            
+            const question = questions[currentQuestion];
+            
+            // Panel de pregunta
+            const questionPanel = createTextPanel(question.question, 3, 0.8, 0x333366);
+            questionPanel.position.set(0, 2.5, -2);
+            scene.add(questionPanel);
+            questionPanels.push(questionPanel);
+            
+            // Botones de respuesta
+            question.answers.forEach((answer, index) => {
+                const isCorrect = index === question.correct;
+                const color = 0x444444;
+                const button = createAnswerButton(answer, index, color, isCorrect);
+                
+                const x = (index % 2) * 2 - 1; // -1 o 1
+                const y = 1.5 - Math.floor(index / 2) * 0.8; // 1.5 o 0.7
+                
+                button.position.set(x, y, -2);
+                scene.add(button);
+                answerButtons.push(button);
+            });
+        }
+        
+        function createTextPanel(text, width, height, color) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 256;
+            const context = canvas.getContext('2d');
+            
+            context.fillStyle = '#' + color.toString(16).padStart(6, '0');
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            
+            context.fillStyle = '#ffffff';
+            context.font = '24px Arial';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            
+            // Dividir texto en líneas
+            const words = text.split(' ');
+            const lines = [];
+            let currentLine = '';
+            
+            words.forEach(word => {
+                const testLine = currentLine + word + ' ';
+                const metrics = context.measureText(testLine);
+                if (metrics.width > canvas.width - 40 && currentLine !== '') {
+                    lines.push(currentLine);
+                    currentLine = word + ' ';
                 } else {
-                    if (navigator.xr) {
-                        navigator.xr.requestSession('immersive-vr', {
-                            requiredFeatures: ['hand-tracking']
-                        }).then(session => {
-                            renderer.xr.setSession(session);
-                        }).catch(err => {
-                            console.log('Error starting VR session:', err);
-                            // Fallback sin hand-tracking
-                            navigator.xr.requestSession('immersive-vr').then(session => {
+                    currentLine = testLine;
+                }
+            });
+            lines.push(currentLine);
+            
+            // Dibujar líneas
+            const lineHeight = 30;
+            const startY = canvas.height / 2 - (lines.length - 1) * lineHeight / 2;
+            lines.forEach((line, index) => {
+                context.fillText(line, canvas.width / 2, startY + index * lineHeight);
+            });
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            const geometry = new THREE.PlaneGeometry(width, height);
+            const material = new THREE.MeshBasicMaterial({ map: texture });
+            
+            return new THREE.Mesh(geometry, material);
+        }
+        
+        function createAnswerButton(text, index, color, isCorrect) {
+            const button = createTextPanel(text, 1.8, 0.6, color);
+            button.userData = { 
+                index: index, 
+                isCorrect: isCorrect,
+                originalColor: color,
+                isButton: true
+            };
+            return button;
+        }
+        
+        function onSelectStart(event) {
+            const controller = event.target;
+            
+            // Configurar raycaster
+            const tempMatrix = new THREE.Matrix4();
+            tempMatrix.identity().extractRotation(controller.matrixWorld);
+            
+            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+            
+            // Verificar intersecciones con botones
+            const intersects = raycaster.intersectObjects(answerButtons);
+            
+            if (intersects.length > 0) {
+                const intersect = intersects[0];
+                const button = intersect.object;
+                
+                if (button.userData.isButton) {
+                    selectAnswer(button.userData.index, button.userData.isCorrect);
+                }
+            }
+        }
+        
+        function onSelectEnd(event) {
+            // Restaurar colores de botones
+            answerButtons.forEach(button => {
+                if (button.material && button.material.color) {
+                    button.material.color.setHex(button.userData.originalColor);
+                }
+            });
+        }
+        
+        function selectAnswer(answerIndex, isCorrect) {
+            if (isCorrect) {
+                score += 20;
+                console.log('¡Respuesta correcta!');
+            } else {
+                console.log('Respuesta incorrecta');
+            }
+            
+            // Actualizar UI
+            updateUI();
+            
+            // Pasar a la siguiente pregunta después de un breve delay
+            setTimeout(() => {
+                currentQuestion++;
+                createQuestionInterface();
+            }, 1000);
+        }
+        
+        function updateUI() {
+            document.getElementById('progress').textContent = `${currentQuestion + 1}/${questions.length}`;
+            document.getElementById('score').textContent = score;
+        }
+        
+        function showFinalScore() {
+            const finalPanel = createTextPanel(
+                `¡Quiz Completado!\nPuntaje Final: ${score}/${questions.length * 20}\nPorcentaje: ${Math.round((score / (questions.length * 20)) * 100)}%`,
+                4, 2, 0x006600
+            );
+            finalPanel.position.set(0, 2, -2);
+            scene.add(finalPanel);
+            
+            // Botón para reiniciar
+            const restartButton = createTextPanel("Reiniciar Quiz", 2, 0.8, 0x0066CC);
+            restartButton.position.set(0, 0.5, -2);
+            restartButton.userData = { isRestart: true, isButton: true };
+            scene.add(restartButton);
+            answerButtons.push(restartButton);
+        }
+        
+        function restartQuiz() {
+            currentQuestion = 0;
+            score = 0;
+            questionPanels.forEach(panel => scene.remove(panel));
+            answerButtons.forEach(button => scene.remove(button));
+            questionPanels = [];
+            answerButtons = [];
+            createQuestionInterface();
+            updateUI();
+        }
+        
+        function setupVRButton() {
+            const button = document.getElementById('vrButton');
+            
+            if ('xr' in navigator) {
+                navigator.xr.isSessionSupported('immersive-vr').then(function(supported) {
+                    if (supported) {
+                        button.addEventListener('click', function() {
+                            navigator.xr.requestSession('immersive-vr').then(function(session) {
                                 renderer.xr.setSession(session);
                             });
                         });
+                    } else {
+                        button.textContent = 'VR No Soportado';
+                        button.disabled = true;
                     }
-                }
-            };
-
-            return button;
-        }
-
-        function onSelectStart(event) {
-            const controller = event.target;
-            const intersections = getIntersections(controller);
-
-            if (intersections.length > 0) {
-                const intersection = intersections[0];
-                const object = intersection.object;
-                
-                // Cambiar color del cubo seleccionado
-                object.material.color.setHex(Math.random() * 0xffffff);
-                
-                // Añadir efecto de escala
-                object.userData.originalScale = object.scale.clone();
-                object.scale.multiplyScalar(1.2);
-                
-                controller.userData.selected = object;
-            }
-        }
-
-        function onSelectEnd(event) {
-            const controller = event.target;
-            
-            if (controller.userData.selected !== undefined) {
-                const object = controller.userData.selected;
-                
-                // Restaurar escala original
-                if (object.userData.originalScale) {
-                    object.scale.copy(object.userData.originalScale);
-                }
-                
-                controller.userData.selected = undefined;
-            }
-        }
-
-        function getIntersections(controller) {
-            const tempMatrix = new THREE.Matrix4();
-            tempMatrix.identity().extractRotation(controller.matrixWorld);
-
-            const raycaster = new THREE.Raycaster();
-            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
-
-            return raycaster.intersectObjects(cubes, false);
-        }
-
-        function intersectObjects(controller) {
-            const line = controller.getObjectByName('line');
-            const intersections = getIntersections(controller);
-
-            if (intersections.length > 0) {
-                const intersection = intersections[0];
-                const object = intersection.object;
-                
-                line.scale.z = intersection.distance;
-                
-                // Resaltar objeto
-                if (controller.userData.highlighted !== object) {
-                    if (controller.userData.highlighted) {
-                        controller.userData.highlighted.material.emissive.setHex(0x000000);
-                    }
-                    object.material.emissive.setHex(0x444444);
-                    controller.userData.highlighted = object;
-                }
+                });
             } else {
-                if (controller.userData.highlighted) {
-                    controller.userData.highlighted.material.emissive.setHex(0x000000);
-                    controller.userData.highlighted = undefined;
-                }
-                line.scale.z = 5;
+                button.textContent = 'WebXR No Disponible';
+                button.disabled = true;
             }
         }
-
+        
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
-
+        
         function animate() {
             renderer.setAnimationLoop(render);
         }
-
+        
         function render() {
-            const delta = clock.getDelta();
+            // Actualizar intersecciones para feedback visual
+            if (controller1 || controller2) {
+                const controllers = [controller1, controller2].filter(c => c);
+                
+                controllers.forEach(controller => {
+                    if (controller.visible) {
+                        const tempMatrix = new THREE.Matrix4();
+                        tempMatrix.identity().extractRotation(controller.matrixWorld);
+                        
+                        raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+                        raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+                        
+                        const intersects = raycaster.intersectObjects(answerButtons);
+                        
+                        // Resetear colores
+                        answerButtons.forEach(button => {
+                            if (button.material && button.material.color) {
+                                button.material.color.setHex(button.userData.originalColor || 0x444444);
+                            }
+                        });
+                        
+                        // Resaltar botón intersectado
+                        if (intersects.length > 0) {
+                            const intersect = intersects[0];
+                            if (intersect.object.material && intersect.object.material.color) {
+                                intersect.object.material.color.setHex(0x666666);
+                            }
+                        }
+                    }
+                });
+            }
             
-            // Rotar cubos
-            cubes.forEach(cube => {
-                cube.rotation.x += delta * 0.5;
-                cube.rotation.y += delta * 0.3;
-            });
-
-            // Intersecciones con controladores
-            intersectObjects(controller1);
-            intersectObjects(controller2);
-
             renderer.render(scene, camera);
         }
+        
+        // Inicializar UI
+        updateUI();
     </script>
 </body>
 </html>
