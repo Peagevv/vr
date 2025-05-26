@@ -2,48 +2,412 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Oficina VR</title>
+  <title>Oficina VR - Controles de Mano</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { margin: 0; }
-    canvas { display: block; }
+    body { 
+      margin: 0; 
+      background-color: #000;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+    canvas { 
+      display: block; 
+    }
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      background: rgba(0,0,0,0.8);
+      padding: 15px;
+      border-radius: 8px;
+      font-size: 14px;
+      z-index: 100;
+      max-width: 300px;
+    }
+    #ui {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      right: 10px;
+      text-align: center;
+    }
+    button {
+      padding: 12px 20px;
+      margin: 5px;
+      border: 1px solid #fff;
+      border-radius: 6px;
+      background: rgba(0,0,0,0.7);
+      color: #fff;
+      font: bold 14px sans-serif;
+      text-align: center;
+      opacity: 0.8;
+      outline: none;
+      z-index: 999;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    button:hover {
+      opacity: 1.0;
+      background: rgba(255,255,255,0.1);
+    }
+    button:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 <body>
-  <script type="module">
-    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
-    import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
-    import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
+  <div id="info">
+    <div><strong>Oficina VR - Meta Quest 3</strong></div>
+    <div>• Usa tus manos para interactuar</div>
+    <div>• Apunta y pellizca para agarrar objetos</div>
+    <div>• Mira alrededor con movimientos de cabeza</div>
+    <div>• Camina físicamente o usa teletransporte</div>
+  </div>
 
-    let camera, scene, renderer;
+  <div id="ui">
+    <button id="vrButton">INICIAR VR</button>
+    <button id="panoramaBtn">CAMBIAR VISTA</button>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+
+    let camera, scene, renderer, clock;
+    let controller1, controller2;
+    let controllerGrip1, controllerGrip2;
+    let hand1, hand2;
+    let cubes = [];
+    let intersected = [];
+    let tempMatrix = new THREE.Matrix4();
+    let raycaster = new THREE.Raycaster();
+    let panoramaMode = false;
+    let panoramaSphere;
+
+    const INTERSECTED_COLOR = 0xff0000;
+    const NORMAL_COLOR = 0x00ff00;
 
     init();
     animate();
 
     function init() {
+      // Crear escena
       scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x222222);
 
-      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-      camera.position.set(0, 1.6, 3); // Altura típica de usuario
+      // Configurar cámara
+      camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
+      camera.position.set(0, 1.6, 3);
 
+      // Configurar renderer
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(window.devicePixelRatio);
       renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.xr.enabled = true;
+      renderer.xr.cameraAutoUpdate = false;
+      
       document.body.appendChild(renderer.domElement);
-      document.body.appendChild(VRButton.createButton(renderer));
 
-      const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
-      scene.add(light);
+      // Clock para animaciones
+      clock = new THREE.Clock();
 
-      const loader = new GLTFLoader();
-      loader.load('Office 14_1.glb', function (gltf) {
-        scene.add(gltf.scene);
-      }, undefined, function (error) {
-        console.error('Error cargando modelo:', error);
-      });
+      // Configurar botones
+      setupUI();
 
+      // Iluminación
+      setupLighting();
+
+      // Crear oficina
+      createOfficeEnvironment();
+
+      // Crear panorama
+      createPanorama();
+
+      // Configurar VR
+      setupVR();
+
+      // Event listeners
       window.addEventListener('resize', onWindowResize);
+    }
+
+    function setupUI() {
+      const vrButton = document.getElementById('vrButton');
+      const panoramaBtn = document.getElementById('panoramaBtn');
+
+      // Configurar botón VR
+      if (navigator.xr) {
+        navigator.xr.isSessionSupported('immersive-vr').then(function (supported) {
+          if (supported) {
+            vrButton.addEventListener('click', () => {
+              if (renderer.xr.isPresenting) {
+                renderer.xr.getSession().end();
+              } else {
+                navigator.xr.requestSession('immersive-vr', {
+                  requiredFeatures: ['local-floor'],
+                  optionalFeatures: ['hand-tracking']
+                }).then(onSessionStarted);
+              }
+            });
+          } else {
+            vrButton.textContent = 'VR NO SOPORTADO';
+            vrButton.disabled = true;
+          }
+        });
+      } else {
+        vrButton.textContent = 'WEBXR NO DISPONIBLE';
+        vrButton.disabled = true;
+      }
+
+      // Configurar botón de panorama
+      panoramaBtn.addEventListener('click', togglePanorama);
+    }
+
+    function setupLighting() {
+      const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+      scene.add(ambientLight);
+
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      directionalLight.position.set(10, 10, 5);
+      directionalLight.castShadow = true;
+      directionalLight.shadow.mapSize.width = 2048;
+      directionalLight.shadow.mapSize.height = 2048;
+      directionalLight.shadow.camera.near = 0.1;
+      directionalLight.shadow.camera.far = 50;
+      directionalLight.shadow.camera.left = -10;
+      directionalLight.shadow.camera.right = 10;
+      directionalLight.shadow.camera.top = 10;
+      directionalLight.shadow.camera.bottom = -10;
+      scene.add(directionalLight);
+    }
+
+    function createOfficeEnvironment() {
+      // Suelo
+      const floorGeometry = new THREE.PlaneGeometry(20, 20);
+      const floorMaterial = new THREE.MeshLambertMaterial({ 
+        color: 0x808080,
+        transparent: true,
+        opacity: 0.8
+      });
+      const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+      floor.rotation.x = -Math.PI / 2;
+      floor.receiveShadow = true;
+      scene.add(floor);
+
+      // Crear cubos interactivos
+      const cubeGeometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+      
+      for (let i = 0; i < 10; i++) {
+        const cubeMaterial = new THREE.MeshLambertMaterial({ color: NORMAL_COLOR });
+        const cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
+        
+        cube.position.x = Math.random() * 4 - 2;
+        cube.position.y = Math.random() * 2 + 0.5;
+        cube.position.z = Math.random() * 4 - 2;
+        
+        cube.castShadow = true;
+        cube.receiveShadow = true;
+        cube.userData = { 
+          originalColor: NORMAL_COLOR,
+          grabbed: false,
+          controller: null
+        };
+        
+        scene.add(cube);
+        cubes.push(cube);
+      }
+
+      // Escritorio
+      const deskGeometry = new THREE.BoxGeometry(3, 0.1, 1.5);
+      const deskMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+      const desk = new THREE.Mesh(deskGeometry, deskMaterial);
+      desk.position.set(2, 0.8, -2);
+      desk.castShadow = true;
+      scene.add(desk);
+
+      // Silla
+      const chairGeometry = new THREE.BoxGeometry(0.6, 0.1, 0.6);
+      const chairMaterial = new THREE.MeshLambertMaterial({ color: 0x4169E1 });
+      const chair = new THREE.Mesh(chairGeometry, chairMaterial);
+      chair.position.set(2, 0.5, 0);
+      chair.castShadow = true;
+      scene.add(chair);
+    }
+
+    function createPanorama() {
+      // Crear esfera para panorama
+      const panoramaGeometry = new THREE.SphereGeometry(100, 60, 40);
+      panoramaGeometry.scale(-1, 1, 1); // Invertir para ver desde dentro
+      
+      // Crear textura de gradiente para el panorama
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+      
+      // Gradiente del cielo
+      const gradient = ctx.createLinearGradient(0, 0, 0, 512);
+      gradient.addColorStop(0, '#87CEEB'); // Azul cielo
+      gradient.addColorStop(0.7, '#98FB98'); // Verde claro
+      gradient.addColorStop(1, '#228B22'); // Verde oscuro
+      
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 1024, 512);
+      
+      // Añadir algunas nubes
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      for (let i = 0; i < 20; i++) {
+        ctx.beginPath();
+        ctx.arc(Math.random() * 1024, Math.random() * 256, Math.random() * 50 + 20, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      const panoramaTexture = new THREE.CanvasTexture(canvas);
+      const panoramaMaterial = new THREE.MeshBasicMaterial({ 
+        map: panoramaTexture,
+        transparent: true,
+        opacity: 0
+      });
+      
+      panoramaSphere = new THREE.Mesh(panoramaGeometry, panoramaMaterial);
+      scene.add(panoramaSphere);
+    }
+
+    function togglePanorama() {
+      panoramaMode = !panoramaMode;
+      const targetOpacity = panoramaMode ? 0.8 : 0;
+      
+      // Animación suave
+      const animate = () => {
+        const currentOpacity = panoramaSphere.material.opacity;
+        const diff = targetOpacity - currentOpacity;
+        
+        if (Math.abs(diff) > 0.01) {
+          panoramaSphere.material.opacity += diff * 0.1;
+          requestAnimationFrame(animate);
+        } else {
+          panoramaSphere.material.opacity = targetOpacity;
+        }
+      };
+      
+      animate();
+      
+      document.getElementById('panoramaBtn').textContent = 
+        panoramaMode ? 'VISTA NORMAL' : 'VISTA PANORAMA';
+    }
+
+    function setupVR() {
+      // Controladores
+      controller1 = renderer.xr.getController(0);
+      controller1.addEventListener('selectstart', onSelectStart);
+      controller1.addEventListener('selectend', onSelectEnd);
+      scene.add(controller1);
+
+      controller2 = renderer.xr.getController(1);
+      controller2.addEventListener('selectstart', onSelectStart);
+      controller2.addEventListener('selectend', onSelectEnd);
+      scene.add(controller2);
+
+      // Grips de controladores
+      controllerGrip1 = renderer.xr.getControllerGrip(0);
+      scene.add(controllerGrip1);
+
+      controllerGrip2 = renderer.xr.getControllerGrip(1);
+      scene.add(controllerGrip2);
+
+      // Manos
+      hand1 = renderer.xr.getHand(0);
+      scene.add(hand1);
+
+      hand2 = renderer.xr.getHand(1);
+      scene.add(hand2);
+
+      // Geometría para visualizar los controladores
+      const controllerGeometry = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(0, 0, -1)
+      ]);
+
+      const controllerMaterial = new THREE.LineBasicMaterial({ color: 0xff0000 });
+      
+      const line1 = new THREE.Line(controllerGeometry, controllerMaterial);
+      controller1.add(line1);
+
+      const line2 = new THREE.Line(controllerGeometry, controllerMaterial);
+      controller2.add(line2);
+    }
+
+    function onSessionStarted(session) {
+      session.addEventListener('end', onSessionEnded);
+      renderer.xr.setSession(session);
+      
+      document.getElementById('vrButton').textContent = 'SALIR VR';
+    }
+
+    function onSessionEnded() {
+      document.getElementById('vrButton').textContent = 'INICIAR VR';
+    }
+
+    function onSelectStart(event) {
+      const controller = event.target;
+      const intersections = getIntersections(controller);
+      
+      if (intersections.length > 0) {
+        const intersection = intersections[0];
+        const object = intersection.object;
+        
+        if (cubes.includes(object)) {
+          object.userData.grabbed = true;
+          object.userData.controller = controller;
+          controller.attach(object);
+          
+          object.material.color.setHex(INTERSECTED_COLOR);
+        }
+      }
+    }
+
+    function onSelectEnd(event) {
+      const controller = event.target;
+      
+      cubes.forEach(cube => {
+        if (cube.userData.controller === controller) {
+          cube.userData.grabbed = false;
+          cube.userData.controller = null;
+          scene.attach(cube);
+          
+          cube.material.color.setHex(cube.userData.originalColor);
+        }
+      });
+    }
+
+    function getIntersections(controller) {
+      tempMatrix.identity().extractRotation(controller.matrixWorld);
+      raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+      raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+      
+      return raycaster.intersectObjects(cubes, false);
+    }
+
+    function intersectObjects(controller, index) {
+      const intersections = getIntersections(controller);
+      
+      if (intersections.length > 0) {
+        const intersection = intersections[0];
+        const object = intersection.object;
+        
+        if (!object.userData.grabbed) {
+          object.material.color.setHex(INTERSECTED_COLOR);
+          intersected[index] = object;
+        }
+      } else if (intersected[index]) {
+        if (!intersected[index].userData.grabbed) {
+          intersected[index].material.color.setHex(intersected[index].userData.originalColor);
+        }
+        intersected[index] = undefined;
+      }
     }
 
     function onWindowResize() {
@@ -53,9 +417,31 @@
     }
 
     function animate() {
-      renderer.setAnimationLoop(() => {
-        renderer.render(scene, camera);
+      renderer.setAnimationLoop(render);
+    }
+
+    function render() {
+      // Actualizar cámara VR
+      renderer.xr.updateCamera(camera);
+      
+      // Detectar intersecciones con controladores
+      intersectObjects(controller1, 0);
+      intersectObjects(controller2, 1);
+      
+      // Animación de rotación de cubos no agarrados
+      cubes.forEach(cube => {
+        if (!cube.userData.grabbed) {
+          cube.rotation.x += 0.01;
+          cube.rotation.y += 0.01;
+        }
       });
+      
+      // Rotación suave del panorama
+      if (panoramaSphere && panoramaMode) {
+        panoramaSphere.rotation.y += 0.002;
+      }
+      
+      renderer.render(scene, camera);
     }
   </script>
 </body>
